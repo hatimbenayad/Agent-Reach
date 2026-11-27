@@ -123,7 +123,10 @@ def _get_json(url: str, config=None) -> Any:
         url, headers={"User-Agent": _UA, "Referer": _REFERER}
     )
     with _opener.open(req, timeout=_TIMEOUT) as resp:
-        raw = resp.read(_MAX_XUEQIU_BYTES + 1)
+        try:
+            raw = resp.read(_MAX_XUEQIU_BYTES + 1)
+        except TypeError:
+            raw = resp.read()
     if len(raw) > _MAX_XUEQIU_BYTES:
         raise ValueError(f"Xueqiu response exceeds {_MAX_XUEQIU_BYTES} byte limit")
     return json.loads(raw.decode("utf-8"))
