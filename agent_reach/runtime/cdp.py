@@ -102,7 +102,7 @@ def call(method: str, params: Optional[dict] = None, *, page: bool = False,
                     return None
                 resp += chunk
             head, _, buf = resp.partition(b"\r\n\r\n")
-            accept = base64.b64encode(hashlib.sha1((key + _GUID).encode()).digest()).decode()
+            accept = base64.b64encode(hashlib.sha1((key + _GUID).encode(), usedforsecurity=False).digest()).decode()
             if head.split(b"\r\n", 1)[0].split()[1:2] != [b"101"] or accept not in head.decode("latin-1"):
                 return None
             _send(sock, json.dumps({"id": 1, "method": method, "params": params or {}}))
