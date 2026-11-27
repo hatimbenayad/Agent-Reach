@@ -98,3 +98,35 @@ def test_opencli_uses_pristine_compatible_release_without_install_hooks(monkeypa
     assert "--ignore-scripts" in calls[0]
     assert calls[0][-1]=="@jackwener/opencli@2.0.3"
     assert not tools.allowed(tools.TOOLS["opencli"],"1.8.8")
+
+
+def test_install_uv_uses_hash_verified_wheel_without_remote_scripts(monkeypatch, tmp_path):
+    monkeypatch.setattr(tools, "tool_dir", lambda name: tmp_path / name)
+    venv = tmp_path / "uv" / "venv"
+    venv_bin = venv / ("Scripts" if tools._WIN else "bin")
+    venv_bin.mkdir(parents=True)
+    py = venv_bin / ("python.exe" if tools._WIN else "python")
+    py.write_text("python", encoding="utf-8")
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        # Simulate pip creating uv and uvx inside the private venv.
+        for cmd in ("uv", "uvx"):
+            (venv_bin / tools._exe(cmd)).write_text("bin", encoding="utf-8")
+        if "-r" in argv:
+            req_text = Path(argv[argv.index("-r") + 1]).read_text(encoding="utf-8")
+            assert f"uv=={tools._UV_VERSION}" in req_text
+            assert "--hash=sha256:" in req_text
+        return ""
+
+    monkeypatch.setattr(tools, "_run", fake_run)
+    tools._install_uv(tools.TOOLS["uv"])
+
+    assert len(calls) == 1
+    argv = calls[0][0]
+    joined = " ".join(argv).lower()
+    assert "irm" not in joined and "iex" not in joined and "astral.sh" not in joined
+    assert "--only-binary" in argv and "--require-hashes" in argv
+    assert tools._private_bin(tools.TOOLS["uv"], "uv").is_file()
+    assert tools._private_bin(tools.TOOLS["uv"], "uvx").is_file()

@@ -425,23 +425,69 @@ def _install_node(tool: Tool) -> None:
         shutil.move(str(out / stem), str(dest / "current"))
 
 
-def _install_uv(tool: Tool) -> None:
-    dest = tool_dir("uv") / "bin"
-    env = {"UV_INSTALL_DIR": str(dest), "UV_NO_MODIFY_PATH": "1", "INSTALLER_NO_MODIFY_PATH": "1"}
-    if _WIN:
-        _run(["powershell", "-ExecutionPolicy", "ByPass", "-c", "irm https://astral.sh/uv/install.ps1 | iex"], env=env)
-    else:
-        from agent_reach.utils.paths import private_temporary_directory
+_UV_VERSION = "0.13.10"
+_UV_WHEEL_HASHES = (
+    "c85a2ecb62d09d61904f5405b525fcc51f971d081f8508a881fa2f9bae7543a7",
+    "19a76fd50a6a2bba38ee088d8336566856569be08196865f98132a08806581fc",
+    "2a9ff188b442419c7aadebc445fcc1f287b25f99af50fa6d563b90cc0047b7cf",
+    "e89dd26ea831dde70639ba0a798fa04a4c7c0226fd2b241da86218bfa370e495",
+    "5bcf77c50760146ff7b41022ab7aeb1954d42dd47b89fad36b43a1a8a43da994",
+    "bf7174b00c88879d4a1019b51256bbdb2dd61c55c7dc896031e16d090e380ce6",
+    "7fa025c4b0f33b9a5357252e1be058d94157e13bfb8ae45d7e27cfce3759c65d",
+    "50bee2a59ea9422b493aabc0cde9288f58fbcf6e8d688c30c4ecd8309459cac1",
+    "e52a1af7f97b717572f9e2bd69e54eb253b2c88a705500e35811c21106c439d4",
+    "7cc9c41b43d583e34c781fd3446405b06e9c5fa2db468ce2a534d353db6429e5",
+    "ee3bca6523ed93c3ae0d1a90c2733be307f5f7cc5287c746214e93a3bae0da13",
+    "a52ee170c00d4de1d42026c4dbb00c5d7f327edcf2b2bddeecd0cfb169868ac7",
+    "a9636b4430a9b8a37ecc4d85111d1fd2560ef616edf5301b84f474073bf89e2f",
+    "771a749b34477501092c9fe6d5e52f45cef944d875b0f2e2c989047a2ee647ab",
+    "ee403b6bbcfda1bc7db269be5c40c1624df27b3b838d3f8a416648e00e2de5d4",
+    "3bf1c1b13cac2533a342ca16b1c5f41347cd399404c9477a04ff79c5f7cb4dea",
+    "d87b9cf8165f2b3cc596e856b5bf794da9cfad6d1b110ca9d87eed42a15b3684",
+    "8b0a15613aae9a3e1c134bb5ee706583af0addced7eb1add992f8b1b3e3a92a0",
+)
 
-        with private_temporary_directory(prefix="uv-") as tmp:
-            script = Path(tmp) / "install.sh"
-            _download("https://astral.sh/uv/install.sh", script)
-            _run(["sh", str(script)], env=env)
-    nested = dest / "bin"  # older installers add a bin/ below UV_INSTALL_DIR
-    if nested.is_dir():
-        for f in nested.iterdir():
-            shutil.move(str(f), str(dest / f.name))
-        nested.rmdir()
+
+def _link_or_copy(src: Path, dst: Path) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.exists() or dst.is_symlink():
+        dst.unlink()
+    try:
+        dst.symlink_to(src)
+    except (OSError, NotImplementedError):
+        shutil.copy2(src, dst)
+
+
+def _install_uv(tool: Tool) -> None:
+    """Install uv from a pinned, SHA256-verified PyPI wheel (never curl|sh or irm|iex)."""
+    from agent_reach.utils.paths import private_temporary_directory
+
+    base = tool_dir("uv")
+    venv = base / "venv"
+    dest = base / "bin"
+    py = venv / ("Scripts/python.exe" if _WIN else "bin/python")
+    if not py.is_file():
+        _run([sys.executable, "-m", "venv", str(venv)], stage="uv:venv")
+    req_lines = [f"uv=={_UV_VERSION} \\"] + [
+        f"    --hash=sha256:{digest}" + (" \\" if i < len(_UV_WHEEL_HASHES) - 1 else "")
+        for i, digest in enumerate(_UV_WHEEL_HASHES)
+    ]
+    with private_temporary_directory(prefix="uv-req-") as tmp:
+        req = Path(tmp) / "uv-requirements.txt"
+        req.write_text("\n".join(req_lines) + "\n", encoding="utf-8")
+        _run(
+            [
+                str(py), "-m", "pip", "install", "--quiet", "--disable-pip-version-check",
+                "--only-binary", ":all:", "--require-hashes", "-r", str(req),
+            ],
+            stage="uv:pip_packages",
+        )
+    venv_bin = venv / ("Scripts" if _WIN else "bin")
+    for cmd in tool.commands:
+        src = venv_bin / _exe(cmd)
+        if not src.is_file():
+            raise ReachError(UPSTREAM_BROKEN, f"uv wheel install finished but {cmd} is missing")
+        _link_or_copy(src, dest / _exe(cmd))
     if not _private_bin(tool, "uvx").exists():
         raise ReachError(UPSTREAM_BROKEN, "the uv installer finished but uvx is missing")
 
