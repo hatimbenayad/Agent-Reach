@@ -2,10 +2,22 @@
 
 Agent Reach makes it easier for AI agents to reach the internet. Contributions that add or repair a channel are the most useful.
 
+## Branching model (Git Flow)
+
+This fork uses **Git Flow** with `develop` as the default branch:
+
+- `main`: production-ready releases only (merges come from `release/*` or `hotfix/*` via pull request, linear history, no direct pushes or force pushes).
+- `develop`: integration branch and default branch for day-to-day development (pull request required, no direct pushes or force pushes).
+- Supporting branches (enforced pattern `^(feature|release|hotfix|bugfix)/[a-z0-9._-]+$`):
+  - `feature/<name>`: new features and hardening work branched from and merged back into `develop`.
+  - `bugfix/<name>`: non-urgent bug fixes merged into `develop`.
+  - `release/<version>`: release preparation branched from `develop` and merged into both `main` and `develop`.
+  - `hotfix/<name>`: urgent production fixes branched from `main` and merged into both `main` and `develop`.
+
 ## Development setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/Agent-Reach.git
+git clone https://github.com/hatimbenayad/Agent-Reach.git
 cd Agent-Reach
 python -m venv .venv
 .venv/bin/pip install -e ".[dev]"
