@@ -11,15 +11,16 @@ For the AI doing the work. This one guide covers a fresh install, an update, and
   - it prints JSON (1.6 and later) → go to [Update](#update).
   - it prints a plain line like `Agent Reach v1.5.0` → go to [Upgrade from 1.5 or earlier](#upgrade-from-15-or-earlier).
   - `agent-reach` is not found → continue below.
-- `uv` missing (`uv --version` fails)? Tell the user: "I'm installing uv, a small tool that installs command-line programs. It needs no admin password." Then run:
-  - macOS / Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-  - Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
+- `uv` missing (`uv --version` fails)? Tell the user: "I'm installing uv, a small tool that installs command-line programs. It needs no admin password." Then install via a package manager or wheel (avoid unverified `curl | sh` / `irm | iex` one-liners):
+  - Any OS (with Python/pip): `python -m pip install --user --only-binary :all: uv`
+  - macOS (Homebrew): `brew install uv`
+  - Windows (winget): `winget install --exact --id astral-sh.uv`
   - Still `uv: command not found`? Open a new shell and try again.
 
 ## 1. Install and set up
 
 ```bash
-uv tool install https://github.com/Panniantong/Agent-Reach/releases/latest/download/agent-reach.zip
+uv tool install https://github.com/hatimbenayad/Agent-Reach/archive/refs/heads/develop.zip
 agent-reach setup
 ```
 
@@ -46,7 +47,7 @@ It upgrades the program, every added channel's tools and the skill. Tell the use
 1. Install uv if it is missing (see step 0).
 2. Install 1.6:
    ```bash
-   uv tool install --force https://github.com/Panniantong/Agent-Reach/releases/latest/download/agent-reach.zip
+   uv tool install --force https://github.com/hatimbenayad/Agent-Reach/archive/refs/heads/develop.zip
    ```
 3. Open a new shell and check `agent-reach version` prints JSON. If it still prints the old line, run `uv tool update-shell`, open a new shell and check again.
 4. Run `agent-reach setup`. It keeps `~/.agent-reach/config.yaml`, removes the old Agent Reach program (only Agent Reach itself, never the user's other tools) and refreshes the skill for every AI.

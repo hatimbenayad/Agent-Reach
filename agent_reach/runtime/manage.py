@@ -805,7 +805,12 @@ def install_method() -> str:
 
 
 def _source(version: str) -> str:
-    return f"https://github.com/{REPO}/archive/refs/tags/v{version}.zip"
+    import re
+
+    clean = str(version).strip().lstrip("v")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", clean):
+        raise ReachError(BAD_INPUT, f"invalid release version: {version!r}")
+    return f"https://github.com/{REPO}/archive/refs/tags/v{clean}.zip"
 
 
 def upgrade_command(version: str) -> List[str]:

@@ -208,3 +208,12 @@ def test_http_helpers_and_open_url_reject_non_http_and_oversized_responses(monke
     monkeypatch.setattr(xueqiu, "_ensure_cookies", lambda *a: None)
     with pytest.raises(ValueError, match="exceeds"):
         xueqiu._get_json("https://xueqiu.com/api")
+
+
+def test_fork_update_repointed_and_validates_version():
+    from agent_reach.runtime import manage, update_notice
+
+    assert update_notice.REPO == "hatimbenayad/Agent-Reach"
+    assert manage.REPO == "hatimbenayad/Agent-Reach"
+    with pytest.raises(ReachError, match="invalid release version"):
+        manage.upgrade_command("../../evil")
