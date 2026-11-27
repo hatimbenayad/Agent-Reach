@@ -19,7 +19,7 @@ from agent_reach.runtime.sessions import session_dir
 from agent_reach.runtime.tools import resolve
 from agent_reach.utils.url import host_matches
 
-from .base import Action, Channel, Param
+from .base import Action, Channel, Param, require_non_flag
 
 
 class BossChannel(Channel):
@@ -132,7 +132,9 @@ class BossChannel(Channel):
 
     def _opencli_search(self, *, query, city, limit, timeout):
         from agent_reach.backends.opencli import opencli_call, opencli_items
-        rows = opencli_call("boss", ["search", query, "--city", city or "全国", "--limit", str(limit)], timeout=timeout)
+        clean_query = require_non_flag(query, "query")
+        clean_city = require_non_flag(city, "city") if city else "全国"
+        rows = opencli_call("boss", ["search", clean_query, "--city", clean_city, "--limit", str(limit)], timeout=timeout)
         return opencli_items(rows)[:limit]
 
 

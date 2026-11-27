@@ -4,7 +4,7 @@
 from agent_reach.backends.opencli import opencli_call, opencli_items
 from agent_reach.runtime.result import BAD_INPUT, NOT_FOUND, UPSTREAM_BROKEN, ReachError
 
-from .base import Action, Channel, Param
+from .base import Action, Channel, Param, require_non_flag
 
 _XHS_LOGIN_HINT = (
     "Run agent-reach login xiaohongshu to open the Agent Reach dedicated browser. "
@@ -65,7 +65,7 @@ class XiaoHongShuChannel(Channel):
 
     def _opencli_search(self, *, query: str, limit: int, timeout: float) -> list:
         rows = opencli_call(
-            "xiaohongshu", ["search", query, "--limit", str(limit)],
+            "xiaohongshu", ["search", require_non_flag(query, "query"), "--limit", str(limit)],
             timeout=timeout, login_hint=_XHS_LOGIN_HINT,
         )
         items = opencli_items(rows)[:limit]

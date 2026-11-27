@@ -7,10 +7,14 @@ establish a site-wide login requirement. These actions use managed browser
 sessions; request authentication only when the selected path requires it.
 """
 
+import re
+
 from agent_reach.backends.opencli import opencli_call, opencli_items
 from agent_reach.runtime.result import BAD_INPUT, UPSTREAM_BROKEN, ReachError
 
-from .base import Action, Channel, Param
+from .base import Action, Channel, Param, require_non_flag
+
+_SUBREDDIT_RE = re.compile(r"^[A-Za-z0-9_]{1,50}$")
 
 _REDDIT_LOGIN_HINT = (
     "Ask the user to log in to reddit.com in the Agent Reach dedicated browser. Never log in on their behalf."
@@ -77,7 +81,7 @@ class RedditChannel(Channel):
     # ── unified entry backends ──
 
     def _opencli_search(self, *, query: str, limit: int, timeout: float) -> list:
-        return _reddit(["search", query, "--limit", str(limit)], timeout)[:limit]
+        return _reddit(["search", require_non_flag(query, "query"), "--limit", str(limit)], timeout)[:limit]
 
 
     def _opencli_read(self, *, target: str, timeout: float) -> list:
@@ -93,4 +97,7 @@ class RedditChannel(Channel):
         return [post]
 
     def _opencli_subreddit(self, *, name: str, limit: int, timeout: float) -> list:
-        return _reddit(["subreddit", name.removeprefix("r/"), "--limit", str(limit)], timeout)[:limit]
+        sub = str(name or "").strip().removeprefix("r/")
+        if not _SUBREDDIT_RE.fullmatch(sub):
+            raise ReachError(BAD_INPUT, "subreddit name must contain only letters, digits, and underscores")
+        return _reddit(["subreddit", sub, "--limit", str(limit)], timeout)[:limit]

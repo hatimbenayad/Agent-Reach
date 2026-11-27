@@ -16,6 +16,16 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 
+def require_non_flag(value: object, label: str) -> str:
+    """Reject empty or leading-dash strings that could be parsed as CLI flags."""
+    from agent_reach.runtime.result import BAD_INPUT, ReachError
+
+    text = str(value or "").strip()
+    if not text or text.startswith("-"):
+        raise ReachError(BAD_INPUT, f"{label} cannot be empty or start with '-'")
+    return text
+
+
 @dataclass(frozen=True)
 class Param:
     """One argument of a unified action."""

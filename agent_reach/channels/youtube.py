@@ -161,7 +161,7 @@ class YouTubeChannel(Channel):
     # ── unified entry backends ──
 
     def _ytdlp_read(self, *, target: str, timeout: float) -> list:
-        out = _run_ytdlp(["--dump-json", "--skip-download", _video_url(target)], timeout)
+        out = _run_ytdlp(["--dump-json", "--skip-download", "--", _video_url(target)], timeout)
         info = json.loads(out.splitlines()[-1])
         return [
             make_item(
@@ -175,7 +175,7 @@ class YouTubeChannel(Channel):
         ]
 
     def _ytdlp_search(self, *, query: str, limit: int, timeout: float) -> list:
-        out = _run_ytdlp(["--flat-playlist", "--dump-json", f"ytsearch{limit}:{query}"], timeout)
+        out = _run_ytdlp(["--flat-playlist", "--dump-json", "--", f"ytsearch{limit}:{query}"], timeout)
         items = []
         for line in out.splitlines():
             if not line.strip():
@@ -196,6 +196,8 @@ class YouTubeChannel(Channel):
     def _ytdlp_subtitle(self, *, target: str, lang: str, timeout: float) -> list:
         url = _video_url(target)
         wanted = [x.strip() for x in lang.split(",") if x.strip()]
+        if not wanted or any(not re.fullmatch(r"[A-Za-z0-9._-]+", code) or code.startswith("-") for code in wanted):
+            raise ReachError(BAD_INPUT, "lang must be comma-separated language codes")
         with private_temporary_directory(prefix="agent-reach-subs-") as tmp:
             out = _run_ytdlp(
                 [
@@ -204,6 +206,7 @@ class YouTubeChannel(Channel):
                     "--sub-langs", ",".join(wanted), "--sub-format", "vtt",
                     "--print", "%(title)s",
                     "-o", "%(id)s.%(ext)s",
+                    "--",
                     url,
                 ],
                 timeout,

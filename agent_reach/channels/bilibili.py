@@ -29,7 +29,7 @@ from agent_reach.runtime.run import CommandFailed, http_request, run_cmd
 from agent_reach.runtime.sessions import has_login_state, session_env
 from agent_reach.utils.url import assert_public_http_url, host_matches, safe_urlopen
 
-from .base import Action, Channel, Param
+from .base import Action, Channel, Param, require_non_flag
 
 _BV_RE = re.compile(r"BV[0-9A-Za-z]{10}")
 _BILI_LOGIN_HINT = (
@@ -233,7 +233,8 @@ class BilibiliChannel(Channel):
     # ── unified entry backends ──
 
     def _cli_search(self, *, query: str, limit: int, timeout: float) -> list:
-        data = _bili_json(["search", query, "--type", "video", "-n", str(limit)], timeout)
+        clean_query = require_non_flag(query, "query")
+        data = _bili_json(["search", clean_query, "--type", "video", "-n", str(limit)], timeout)
         return [_cli_video_item(v) for v in (data if isinstance(data, list) else [])[:limit]]
 
     def _cli_read(self, *, target: str, timeout: float) -> list:

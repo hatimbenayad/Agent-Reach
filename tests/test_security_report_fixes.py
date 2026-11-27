@@ -105,3 +105,44 @@ def test_xiaoyuzhou_script_hides_groq_key_from_curl_argv(bash_executable):
     body = script.read_text(encoding="utf-8")
     assert "Authorization: Bearer $GROQ_API_KEY" not in body or "-K -" in body
     assert '-H "Authorization:' not in body
+
+
+def test_channels_reject_leading_dash_flag_injection_and_invalid_ids(monkeypatch):
+    from agent_reach.channels import (
+        bilibili,
+        boss,
+        facebook,
+        instagram,
+        linkedin,
+        reddit,
+        twitter,
+        xiaohongshu,
+        youtube,
+    )
+
+    monkeypatch.setattr(bilibili, "run_cmd", lambda *a, **k: pytest.fail("unexpected subprocess"))
+    monkeypatch.setattr(youtube, "run_cmd", lambda *a, **k: pytest.fail("unexpected subprocess"))
+    monkeypatch.setattr("agent_reach.backends.opencli.opencli_call", lambda *a, **k: pytest.fail("unexpected opencli"))
+
+    with pytest.raises(ReachError, match="start with '-'"):
+        bilibili.BilibiliChannel()._cli_search(query="--config", limit=1, timeout=5)
+    with pytest.raises(ReachError, match="start with '-'"):
+        xiaohongshu.XiaoHongShuChannel()._opencli_search(query="--help", limit=1, timeout=5)
+    with pytest.raises(ReachError, match="start with '-'"):
+        reddit.RedditChannel()._opencli_search(query="-flag", limit=1, timeout=5)
+    with pytest.raises(ReachError, match="subreddit"):
+        reddit.RedditChannel()._opencli_subreddit(name="--bad/sub", limit=1, timeout=5)
+    with pytest.raises(ReachError, match="handle"):
+        twitter.TwitterChannel()._opencli_profile(username="--bad", timeout=5)
+    with pytest.raises(ReachError, match="numeric tweet id"):
+        twitter.TwitterChannel()._opencli_thread(target="--bad", timeout=5)
+    with pytest.raises(ReachError, match="handle"):
+        instagram.InstagramChannel()._opencli_profile(username="../etc", timeout=5)
+    with pytest.raises(ReachError, match="start with '-'"):
+        facebook.FacebookChannel()._opencli_profile(username="-bad", timeout=5)
+    with pytest.raises(ReachError, match="start with '-'"):
+        linkedin.LinkedInChannel()._jobs(query="python", location="--bad", limit=1, timeout=5)
+    with pytest.raises(ReachError, match="start with '-'"):
+        boss.BossChannel()._opencli_search(query="-bad", city=None, limit=1, timeout=5)
+    with pytest.raises(ReachError, match="language codes"):
+        youtube.YouTubeChannel()._ytdlp_subtitle(target="jNQXAC9IVRw", lang="--exec", timeout=5)

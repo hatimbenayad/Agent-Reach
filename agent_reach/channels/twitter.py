@@ -1,11 +1,16 @@
 # -*- coding: utf-8 -*-
 """Twitter/X — OpenCLI in the Agent Reach browser (experimental)."""
 
+import re
+
 from agent_reach.backends.opencli import opencli_call, opencli_items
-from agent_reach.runtime.result import UPSTREAM_BROKEN, ReachError
+from agent_reach.runtime.result import BAD_INPUT, UPSTREAM_BROKEN, ReachError
 from agent_reach.utils.url import host_matches
 
-from .base import Action, Channel, Param
+from .base import Action, Channel, Param, require_non_flag
+
+_TWITTER_HANDLE_RE = re.compile(r"^[A-Za-z0-9_]{1,30}$")
+_TWEET_ID_RE = re.compile(r"^[0-9]{1,30}$")
 
 _TWITTER_LOGIN_HINT = (
     "Ask the user to log in to x.com in the Agent Reach dedicated browser. Never log in on their behalf."
@@ -77,15 +82,27 @@ class TwitterChannel(Channel):
     # ── unified entry backends ──
 
     def _opencli_search(self, *, query: str, limit: int, timeout: float) -> list:
-        return _x(["search", query, "--limit", str(limit)], timeout)[:limit]
+        return _x(["search", require_non_flag(query, "query"), "--limit", str(limit)], timeout)[:limit]
 
+    @staticmethod
+    def _clean_username(username: str) -> str:
+        handle = str(username or "").strip().lstrip("@")
+        if not _TWITTER_HANDLE_RE.fullmatch(handle):
+            raise ReachError(BAD_INPUT, "username must be a valid X/Twitter handle")
+        return handle
 
     def _opencli_profile(self, *, username: str, timeout: float) -> list:
-        return _x(["profile", username.lstrip("@")], timeout)[:1]
+        return _x(["profile", self._clean_username(username)], timeout)[:1]
 
     def _opencli_tweets(self, *, username: str, limit: int, timeout: float) -> list:
-        return _x(["tweets", username.lstrip("@"), "--limit", str(limit)], timeout)[:limit]
+        return _x(["tweets", self._clean_username(username), "--limit", str(limit)], timeout)[:limit]
 
     def _opencli_thread(self, *, target: str, timeout: float) -> list:
-        tweet_id = str(target).rstrip("/").split("/")[-1].split("?")[0]
+        raw = str(target or "").strip()
+        if host_matches(raw, "x.com", "twitter.com"):
+            tweet_id = raw.rstrip("/").split("/")[-1].split("?")[0].split("#")[0]
+        else:
+            tweet_id = raw
+        if not _TWEET_ID_RE.fullmatch(tweet_id):
+            raise ReachError(BAD_INPUT, "target must be a numeric tweet id or x.com/twitter.com status link")
         return _x(["thread", tweet_id], timeout)

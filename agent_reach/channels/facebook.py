@@ -1,8 +1,14 @@
 # -*- coding: utf-8 -*-
 """Facebook search and profiles through OpenCLI in the shared Agent Reach browser."""
 
+import re
+
+from agent_reach.runtime.result import BAD_INPUT, ReachError
+
 from ._opencli_site import OpenCLISiteChannel
-from .base import Action, Param
+from .base import Action, Param, require_non_flag
+
+_FACEBOOK_USER_RE = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
 
 
 class FacebookChannel(OpenCLISiteChannel):
@@ -37,7 +43,10 @@ class FacebookChannel(OpenCLISiteChannel):
     )
 
     def _opencli_search(self, *, query: str, limit: int, timeout: float) -> list:
-        return self._opencli(["search", query, "--limit", str(limit)], timeout)[:limit]
+        return self._opencli(["search", require_non_flag(query, "query"), "--limit", str(limit)], timeout)[:limit]
 
     def _opencli_profile(self, *, username: str, timeout: float) -> list:
-        return self._opencli(["profile", username], timeout, empty_is_error=False)[:1]
+        user = require_non_flag(username, "username")
+        if not _FACEBOOK_USER_RE.fullmatch(user) or user in {".", ".."}:
+            raise ReachError(BAD_INPUT, "username must be a valid Facebook username or page name")
+        return self._opencli(["profile", user], timeout, empty_is_error=False)[:1]

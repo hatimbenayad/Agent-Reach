@@ -6,7 +6,7 @@ from agent_reach.runtime.result import BAD_INPUT, ReachError
 from agent_reach.utils.url import host_matches
 
 from ._opencli_site import OpenCLISiteChannel
-from .base import Action, Param
+from .base import Action, Param, require_non_flag
 
 
 class LinkedInChannel(OpenCLISiteChannel):
@@ -28,9 +28,9 @@ class LinkedInChannel(OpenCLISiteChannel):
     )
 
     def _jobs(self, *, query, location, limit, timeout):
-        args = ["search", query, "--limit", str(limit)]
+        args = ["search", require_non_flag(query, "query"), "--limit", str(limit)]
         if location:
-            args += ["--location", location]
+            args += ["--location", require_non_flag(location, "location")]
         return self._opencli(args, timeout)[:limit]
 
     def _read(self, *, target, timeout):
