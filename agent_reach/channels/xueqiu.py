@@ -19,8 +19,11 @@ from agent_reach.runtime.result import (
     make_item,
 )
 from agent_reach.runtime.run import http_request
+from agent_reach.utils.url import host_matches
 
 from .base import Action, Channel, Param
+
+_MAX_XUEQIU_BYTES = 5 * 1024 * 1024
 
 _XQ_LOGIN_HINT = (
     "Xueqiu community data needs a browser session. Run `agent-reach login xueqiu`, "
@@ -113,12 +116,17 @@ def _ensure_cookies(config=None) -> None:
 
 def _get_json(url: str, config=None) -> Any:
     """Fetch *url* with Xueqiu session cookies and return parsed JSON."""
+    if urllib.parse.urlsplit(url).scheme.lower() != "https" or not host_matches(url, "xueqiu.com"):
+        raise ValueError("only HTTPS xueqiu.com URLs are allowed")
     _ensure_cookies(config)
     req = urllib.request.Request(
         url, headers={"User-Agent": _UA, "Referer": _REFERER}
     )
     with _opener.open(req, timeout=_TIMEOUT) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+        raw = resp.read(_MAX_XUEQIU_BYTES + 1)
+    if len(raw) > _MAX_XUEQIU_BYTES:
+        raise ValueError(f"Xueqiu response exceeds {_MAX_XUEQIU_BYTES} byte limit")
+    return json.loads(raw.decode("utf-8"))
 
 
 def _strip_html(text: str) -> str:
@@ -196,7 +204,7 @@ def _xq_json(url: str) -> Any:
 
 def _error_code(exc: urllib.error.HTTPError) -> str:
     try:
-        return str(json.loads(exc.read().decode("utf-8")).get("error_code", ""))
+        return str(json.loads(exc.read(64 * 1024).decode("utf-8")).get("error_code", ""))
     except Exception:  # noqa: BLE001 - an unreadable body is not login evidence
         return ""
 
@@ -310,7 +318,7 @@ class XueqiuChannel(Channel):
         ]
 
     def _tencent_search(self, *, query: str, limit: int, timeout: float) -> list:
-        q = urllib.parse.quote(query)
+        q = urllib.parse.quote(query, safe="")
         body = http_request(f"https://smartbox.gtimg.cn/s3/?v=2&q={q}&t=all", timeout=timeout).decode("utf-8", errors="replace")
         m = re.search(r'="([^"]*)"', body)
         if not m or m.group(1) in ("", "N"):
@@ -348,7 +356,7 @@ class XueqiuChannel(Channel):
         ]
 
     def _xq_search(self, *, query: str, limit: int, timeout: float) -> list:
-        data = _xq_json(f"https://xueqiu.com/stock/search.json?code={urllib.parse.quote(query)}&size={limit}")
+        data = _xq_json(f"https://xueqiu.com/stock/search.json?code={urllib.parse.quote(query, safe='')}&size={limit}")
         return [
             make_item(title=f"{s.get('name')} ({s.get('code')})", url=f"https://xueqiu.com/S/{s.get('code')}", raw=s)
             for s in (data.get("stocks") or [])[:limit]

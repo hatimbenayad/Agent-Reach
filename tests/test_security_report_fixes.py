@@ -180,3 +180,31 @@ def test_configure_warns_when_secret_passed_as_cli_arg(capsys, monkeypatch):
     captured = capsys.readouterr()
     assert "Warning:" in captured.err
     assert "--stdin" in captured.err
+
+
+def test_http_helpers_and_open_url_reject_non_http_and_oversized_responses(monkeypatch, tmp_path):
+    from agent_reach.channels import xueqiu
+    from agent_reach.runtime import browser, run
+
+    with pytest.raises(ReachError, match="HTTP\\(S\\)"):
+        run.http_request("file:///etc/passwd", timeout=1)
+
+    monkeypatch.setattr(browser, "_require_owned", lambda: None)
+    for bad in ("file:///etc/passwd", "javascript:alert(1)", "chrome://settings"):
+        with pytest.raises(ValueError, match="unsupported URL scheme"):
+            browser.open_url(bad)
+
+    class BigResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, n=-1):
+            return b"x" * n if n > 0 else b"x" * 100
+
+    monkeypatch.setattr(xueqiu._opener, "open", lambda *a, **k: BigResp())
+    monkeypatch.setattr(xueqiu, "_ensure_cookies", lambda *a: None)
+    with pytest.raises(ValueError, match="exceeds"):
+        xueqiu._get_json("https://xueqiu.com/api")

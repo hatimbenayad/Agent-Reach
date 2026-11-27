@@ -316,14 +316,26 @@ def _run(argv, timeout: float = 600, env: Optional[dict] = None, *, stage: str =
     return proc.stdout
 
 
-def _download(url: str, dest: Path, timeout: float = 600) -> None:
+def _download(url: str, dest: Path, timeout: float = 600, max_bytes: int = 200 * 1024 * 1024) -> None:
+    from urllib.parse import urlsplit
+
+    if urlsplit(url).scheme.lower() not in {"http", "https"}:
+        raise ReachError(UPSTREAM_BROKEN, "only HTTP(S) download URLs are allowed")
     proxy = _install_env().get("HTTPS_PROXY")
     handlers = [urllib.request.ProxyHandler({"https": proxy, "http": proxy})] if proxy else []
     opener = urllib.request.build_opener(*handlers)
     req = urllib.request.Request(url, headers={"User-Agent": "agent-reach"})
+    total = 0
     try:
         with opener.open(req, timeout=timeout) as resp, open(dest, "wb") as fh:
-            shutil.copyfileobj(resp, fh, 1024 * 1024)
+            while True:
+                chunk = resp.read(min(1 << 20, max_bytes - total + 1))
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise ReachError(UPSTREAM_BROKEN, f"download exceeds {max_bytes} byte limit")
+                fh.write(chunk)
     except OSError as exc:
         raise ReachError(UPSTREAM_BROKEN, _clean(f"download failed: {url}: {exc}")) from None
 

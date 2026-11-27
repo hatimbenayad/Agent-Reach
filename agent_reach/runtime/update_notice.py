@@ -20,6 +20,7 @@ from . import state
 REPO = "Panniantong/Agent-Reach"
 FETCH_TIMEOUT = 10.0
 NOTES_MAX = 2000
+_MAX_RELEASE_BYTES = 2 * 1024 * 1024
 
 
 def cache_path() -> Path:
@@ -37,8 +38,11 @@ def fetch_latest(timeout: float = FETCH_TIMEOUT) -> dict:
     """{latest, notes} of the latest GitHub release. Raises on network errors."""
     req = urllib.request.Request(f"https://api.github.com/repos/{REPO}/releases/latest",
                                  headers={"User-Agent": "agent-reach", "Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        rel = json.loads(resp.read())
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 - fixed HTTPS GitHub API URL
+        raw = resp.read(_MAX_RELEASE_BYTES + 1)
+    if len(raw) > _MAX_RELEASE_BYTES:
+        raise ValueError(f"release metadata exceeds {_MAX_RELEASE_BYTES} byte limit")
+    rel = json.loads(raw)
     return {"latest": str(rel.get("tag_name", "")).lstrip("v"), "notes": (rel.get("body") or "")[:NOTES_MAX]}
 
 

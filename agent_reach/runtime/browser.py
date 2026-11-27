@@ -695,9 +695,12 @@ def stop(timeout: float = 10.0) -> bool:
 
 
 def open_url(url: str) -> None:
-    """Open a new tab in the running dedicated browser."""
+    """Open a new tab in the running dedicated browser (HTTP/HTTPS or about:blank only)."""
+    target = str(url or "").strip()
+    if target != "about:blank":
+        _require_http_url(target)
     _require_owned()
-    req = urllib.request.Request(f"{CDP_URL}/json/new?{urllib.parse.quote(url, safe='')}", method="PUT")
+    req = urllib.request.Request(f"{CDP_URL}/json/new?{urllib.parse.quote(target, safe='')}", method="PUT")
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # loopback: never proxy
     with opener.open(req, timeout=5):
         pass

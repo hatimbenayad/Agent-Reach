@@ -156,11 +156,15 @@ def http_request(
     headers: Optional[Mapping[str, str]] = None,
     max_bytes: int = _DEFAULT_MAX_BYTES,
 ) -> bytes:
-    """GET (or POST when `data` is given) with a size cap. Errors propagate to classify()."""
+    """GET (or POST when `data` is given) with scheme and size caps. Errors propagate to classify()."""
+    from urllib.parse import urlsplit
+
+    if urlsplit(url).scheme.lower() not in {"http", "https"}:
+        raise ReachError(BAD_INPUT, "only HTTP(S) URLs are allowed")
     merged = {"User-Agent": _USER_AGENT}
     merged.update(headers or {})
     req = urllib.request.Request(url, data=data, headers=merged)
-    with urllib.request.urlopen(req, timeout=max(timeout, 0.1)) as resp:
+    with urllib.request.urlopen(req, timeout=max(timeout, 0.1)) as resp:  # nosec B310 - scheme validated
         body = resp.read(max_bytes + 1)
         declared = getattr(resp, "headers", {}).get("Content-Length", "")
         if isinstance(declared, str) and declared.strip().isdigit() and len(body) <= max_bytes:

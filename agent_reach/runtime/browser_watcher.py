@@ -109,6 +109,8 @@ def watch(idle: Optional[float] = None, poll: float = 2.0, *, launch: Optional[s
             return "another watcher is running"
         bridge_proc = bridge.start()
         if launch is not None:
+            if launch != "about:blank":
+                browser._require_http_url(launch)
             if browser.is_running():
                 return "a browser is already using the debugging port"
             if cloak:
