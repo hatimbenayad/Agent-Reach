@@ -125,6 +125,7 @@ Tool: `pip-audit 2.10.1` against `constraints.txt` (`--no-deps --disable-pip`):
 
 ## 6. Post-Hardening Verification & Residual Risk
 
+- **Self-update & fork repointing choice:** Repointed `agent_reach/runtime/update_notice.py` (`REPO = "hatimbenayad/Agent-Reach"`) and `agent_reach/runtime/manage.py` (`REPO = update_notice.REPO`) to the hardened fork instead of making `update` check-only, and added strict semver validation (`^\d+\.\d+\.\d+$`) in `manage._source()` (`646ff37`). As a result, `agent-reach update` and `update --check` never download releases from `Panniantong/Agent-Reach` and only install releases tagged as `vX.Y.Z` on `hatimbenayad/Agent-Reach`.
 - **Full git-history secret scan:** `gitleaks 8.30.1` (`--log-opts="--all"`) scanned all 447 commits (~3.37 MB) and found **0 leaks**.
 - **SAST (`bandit 1.9.4`):** 0 High-severity issues (down from 3); 2 Medium `B310` notices remain on `v2ex.py:52` and `web.py:189` (both validate HTTPS URLs immediately before `urlopen`).
 - **Lint & type checks:** `ruff` and `mypy agent_reach` (50 source files) pass with 0 errors.
