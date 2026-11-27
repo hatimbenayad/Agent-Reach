@@ -85,6 +85,12 @@ if [ -z "$GROQ_API_KEY" ]; then
     fi
 fi
 GROQ_API_KEY="${GROQ_API_KEY:?请设置 GROQ_API_KEY 环境变量或运行 agent-reach configure groq-key}"
+case "$GROQ_API_KEY" in
+    *$'\n'*|*$'\r'*|*\"*|*\\*)
+        echo "❌ GROQ_API_KEY 包含非法字符" >&2
+        exit 1
+        ;;
+esac
 
 # Groq API 限制: 25MB per file
 MAX_CHUNK_SIZE_MB=20
@@ -216,21 +222,28 @@ fi
 # Step 6: 调用 Groq Whisper API 转录
 echo "🎙️  正在转录 (Groq Whisper large-v3)..."
 
-for i in $(seq 0 $((NUM_CHUNKS - 1))); do
-    echo -n "   段 $((i+1))/$NUM_CHUNKS... "
-    
-    RESPONSE=$(curl --silent --show-error \
+groq_whisper_post() {
+    local chunk_file="$1"
+    # Pass Authorization via curl stdin config (-K -) so GROQ_API_KEY never appears in ps/cmdline.
+    printf 'header = "Authorization: Bearer %s"\n' "$GROQ_API_KEY" | curl --silent --show-error \
+        --proto =https --proto-redir =https \
         --connect-timeout "$CURL_CONNECT_TIMEOUT" \
         --max-time "$GROQ_TIMEOUT" \
         --max-filesize "$MAX_API_RESPONSE_BYTES" \
         -w "\n%{http_code}" \
+        -K - \
         https://api.groq.com/openai/v1/audio/transcriptions \
-        -H "Authorization: Bearer $GROQ_API_KEY" \
-        -F file="@$WORK_DIR/chunk_${i}.mp3" \
+        -F file="@${chunk_file}" \
         -F model="whisper-large-v3" \
         -F language="zh" \
         -F prompt="以下是一段中文普通话播客录音，请输出包含完整中文标点（，。？！：；“”‘’）的转写文本。" \
-        -F response_format="text")
+        -F response_format="text"
+}
+
+for i in $(seq 0 $((NUM_CHUNKS - 1))); do
+    echo -n "   段 $((i+1))/$NUM_CHUNKS... "
+    
+    RESPONSE=$(groq_whisper_post "$WORK_DIR/chunk_${i}.mp3")
     
     HTTP_CODE=$(echo "$RESPONSE" | tail -1)
     BODY=$(echo "$RESPONSE" | sed '$d')
@@ -250,18 +263,7 @@ for i in $(seq 0 $((NUM_CHUNKS - 1))); do
             fi
             echo "   ⏳ 速率限制，等待 ${WAIT_SEC} 秒后重试..."
             sleep "$WAIT_SEC"
-            RESPONSE=$(curl --silent --show-error \
-                --connect-timeout "$CURL_CONNECT_TIMEOUT" \
-                --max-time "$GROQ_TIMEOUT" \
-                --max-filesize "$MAX_API_RESPONSE_BYTES" \
-                -w "\n%{http_code}" \
-                https://api.groq.com/openai/v1/audio/transcriptions \
-                -H "Authorization: Bearer $GROQ_API_KEY" \
-                -F file="@$WORK_DIR/chunk_${i}.mp3" \
-                -F model="whisper-large-v3" \
-                -F language="zh" \
-                -F prompt="以下是一段中文普通话播客录音，请输出包含完整中文标点（，。？！：；“”‘’）的转写文本。" \
-                -F response_format="text")
+            RESPONSE=$(groq_whisper_post "$WORK_DIR/chunk_${i}.mp3")
             HTTP_CODE=$(echo "$RESPONSE" | tail -1)
             BODY=$(echo "$RESPONSE" | sed '$d')
             

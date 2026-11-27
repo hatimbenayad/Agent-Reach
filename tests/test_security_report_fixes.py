@@ -93,3 +93,15 @@ def test_existing_cloakbrowser_copy_is_repaired_only_when_broken(monkeypatch, tm
     monkeypatch.setattr(tools, "_private_version", lambda tool: "0.6.3")
     tools.ensure("cloakbrowser")
     assert installed == (["cloakbrowser"] if reinstall else [])
+
+
+def test_xiaoyuzhou_script_hides_groq_key_from_curl_argv(bash_executable):
+    import subprocess
+    from pathlib import Path
+
+    script = Path(__file__).parents[1] / "agent_reach" / "scripts" / "transcribe_xiaoyuzhou.sh"
+    res = subprocess.run([bash_executable, "-n", str(script)], capture_output=True, text=True, timeout=10)
+    assert res.returncode == 0, res.stderr
+    body = script.read_text(encoding="utf-8")
+    assert "Authorization: Bearer $GROQ_API_KEY" not in body or "-K -" in body
+    assert '-H "Authorization:' not in body
