@@ -9,6 +9,7 @@ and closes it after 600 seconds without use. Website adapters stay upstream.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import platform
@@ -69,9 +70,16 @@ _LOCK_WAIT = START_WAIT + 30.0
 #: How long Windows setup waits for the user to add the extension from the Web Store.
 _STORE_WAIT = 180.0
 
-OPENCLI_RELEASE_API = "https://api.github.com/repos/jackwener/OpenCLI/releases/latest"
+OPENCLI_EXTENSION_TAG = "v2.0.3"
+OPENCLI_RELEASE_API = f"https://api.github.com/repos/jackwener/OpenCLI/releases/tags/{OPENCLI_EXTENSION_TAG}"
+OPENCLI_EXTENSION_HASHES = {
+    "opencli-extension-v1.0.27.zip": "8636d42a0fe44d7ba3b0603dbcd9581e8269ccbca950136d0dfc0ffc39a8a213",
+}
 _EXTENSION_ASSET_RE = re.compile(r"^opencli-extension-.*\.zip$")
 _USER_AGENT = "agent-reach"
+_MAX_FETCH_BYTES = 2 * 1024 * 1024
+_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
+_MAX_UNZIP_BYTES = 64 * 1024 * 1024
 
 
 def browser_root() -> Path:
@@ -259,37 +267,83 @@ def wait_for(check: Callable[[], bool], seconds: float, interval: float = 1.0) -
 # ── downloads ──
 
 
-def _fetch(url: str, timeout: float = 30.0) -> bytes:
-    """GET `url` (honours the OS / env proxy settings)."""
-    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()
+def _require_http_url(url: str) -> str:
+    parsed = urllib.parse.urlsplit(str(url or "").strip())
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"unsupported URL scheme: {parsed.scheme or '<empty>'}")
+    return url
 
 
-def _download(url: str, dest: Path, timeout: float = 60.0) -> None:
+def _fetch(url: str, timeout: float = 30.0, max_bytes: int = _MAX_FETCH_BYTES) -> bytes:
+    """GET `url` (honours the OS / env proxy settings) with scheme and size checks."""
+    _require_http_url(url)
     req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    with urllib.request.urlopen(req, timeout=timeout) as resp, open(dest, "wb") as out:
-        shutil.copyfileobj(resp, out, 1 << 20)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 - scheme validated
+        data = resp.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise ValueError(f"response exceeds {max_bytes} byte limit")
+    return data
+
+
+def _download(url: str, dest: Path, timeout: float = 60.0, max_bytes: int = _MAX_DOWNLOAD_BYTES) -> None:
+    _require_http_url(url)
+    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+    total = 0
+    with urllib.request.urlopen(req, timeout=timeout) as resp, open(dest, "wb") as out:  # nosec B310 - scheme validated
+        while True:
+            chunk = resp.read(min(1 << 20, max_bytes - total + 1))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                raise ValueError(f"download exceeds {max_bytes} byte limit")
+            out.write(chunk)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _unzip(archive: Path, dest: Path) -> None:
-    """Extract keeping symlinks and exec bits (a Chrome .app is full of both)."""
-    if platform.system() == "Darwin" and shutil.which("ditto"):
-        subprocess.run(["ditto", "-x", "-k", str(archive), str(dest)], check=True, capture_output=True, timeout=600)
-        return
+    """Extract safely into `dest`, rejecting symlinks, zip-slip, and zip bombs."""
+    from agent_reach.utils.paths import ensure_no_symlink_path
+
     root = dest.resolve()
+    total_bytes = 0
     with zipfile.ZipFile(archive) as zf:
         for info in zf.infolist():
-            target = (dest / info.filename).resolve()
+            mode = info.external_attr >> 16
+            if (mode & 0o170000) == 0o120000:
+                raise ValueError(f"symlinks are not allowed in archive: {info.filename}")
+            member_path = Path(info.filename)
+            if member_path.is_absolute() or ".." in member_path.parts:
+                raise ValueError(f"unsafe path in archive: {info.filename}")
+            target = (dest / member_path).resolve()
             if target != root and root not in target.parents:
                 raise ValueError(f"unsafe path in archive: {info.filename}")
-            mode = info.external_attr >> 16
-            if (mode & 0o170000) == 0o120000:  # symlink
-                target.parent.mkdir(parents=True, exist_ok=True)
-                os.symlink(zf.read(info).decode("utf-8"), target)
+            ensure_no_symlink_path(target, "extracted archive member")
+            if info.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
                 continue
-            zf.extract(info, dest)
-            if mode & 0o111 and not info.is_dir():
+            total_bytes += info.file_size
+            if total_bytes > _MAX_UNZIP_BYTES:
+                raise ValueError("uncompressed archive exceeds safety limit")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(info) as src, open(target, "wb") as dst:
+                written = 0
+                while True:
+                    chunk = src.read(min(65536, _MAX_UNZIP_BYTES - (total_bytes - info.file_size) - written + 1))
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if (total_bytes - info.file_size) + written > _MAX_UNZIP_BYTES:
+                        raise ValueError("uncompressed archive exceeds safety limit")
+                    dst.write(chunk)
+            if mode & 0o111:
                 os.chmod(target, (mode & 0o777) | 0o600)
 
 
@@ -403,11 +457,15 @@ def refresh_extension(*, upgrade: bool = False) -> dict:
         return {"version": current, "updated": False}
     try:
         release = json.loads(_fetch(OPENCLI_RELEASE_API))
-        asset = next(a for a in release.get("assets", []) if _EXTENSION_ASSET_RE.match(a.get("name", "")))
+        asset = next(
+            a for a in release.get("assets", [])
+            if _EXTENSION_ASSET_RE.match(a.get("name", "")) and a.get("name") in OPENCLI_EXTENSION_HASHES
+        )
     except Exception as exc:  # noqa: BLE001
         if current:
             return {"version": current, "updated": False}
-        raise ReachError(UPSTREAM_BROKEN, f"could not find the OpenCLI extension release: {exc}") from None
+        raise ReachError(UPSTREAM_BROKEN, f"could not find a pinned OpenCLI extension release: {exc}") from None
+    expected_sha256 = OPENCLI_EXTENSION_HASHES[asset["name"]]
     state = _load_state()
     if current and state.get("extension_asset") == asset["name"]:
         return {"version": current, "updated": False}
@@ -418,6 +476,8 @@ def refresh_extension(*, upgrade: bool = False) -> dict:
     try:
         archive = work / "extension.zip"
         _download(asset["browser_download_url"], archive)
+        if _sha256_file(archive).lower() != expected_sha256.lower():
+            raise ValueError(f"SHA256 mismatch for {asset['name']}")
         unpacked = work / "unpacked"
         unpacked.mkdir()
         _unzip(archive, unpacked)

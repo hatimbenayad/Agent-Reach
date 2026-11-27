@@ -39,9 +39,15 @@ def test_domain_match_is_exact_or_subdomain():
 
 
 def test_extension_installs_at_a_stable_path_and_refreshes_only_on_new_release(home, monkeypatch, tmp_path):
+    import hashlib
+
     manifest = lambda v: (json.dumps({"manifest_version": 3, "version": v}), 0o644)  # noqa: E731
     v1 = _zip(tmp_path / "v1.zip", {"manifest.json": manifest("1.0.1"), "dist/background.js": ("//", 0o644)})
     v2 = _zip(tmp_path / "v2.zip", {"manifest.json": manifest("1.0.2")})
+    monkeypatch.setattr(browser, "OPENCLI_EXTENSION_HASHES", {
+        "opencli-extension-v1.0.1.zip": hashlib.sha256(v1.read_bytes()).hexdigest(),
+        "opencli-extension-v1.0.2.zip": hashlib.sha256(v2.read_bytes()).hexdigest(),
+    })
     release = {"assets": [{"name": "opencli-extension-v1.0.1.zip", "browser_download_url": "u1"}]}
     _fake_downloads(monkeypatch, {browser.OPENCLI_RELEASE_API: release}, {"u1": v1, "u2": v2})
 
@@ -54,6 +60,41 @@ def test_extension_installs_at_a_stable_path_and_refreshes_only_on_new_release(h
     assert browser.refresh_extension(upgrade=True) == {"version": "1.0.2", "updated": True}
     assert browser.extension_version() == "1.0.2"
     assert browser._load_state()["extension_version"] == "1.0.2"
+
+
+def test_extension_rejects_unpinned_or_mismatched_sha256(home, monkeypatch, tmp_path):
+    from agent_reach.runtime.result import ReachError
+
+    bad_zip = _zip(tmp_path / "bad.zip", {"manifest.json": ('{"version": "9.9.9"}', 0o644)})
+    # Unpinned asset name is rejected.
+    _fake_downloads(
+        monkeypatch,
+        {browser.OPENCLI_RELEASE_API: {"assets": [{"name": "opencli-extension-v9.9.9.zip", "browser_download_url": "u1"}]}},
+        {"u1": bad_zip},
+    )
+    with pytest.raises(ReachError, match="pinned OpenCLI"):
+        browser.refresh_extension()
+
+    # Pinned asset name with wrong SHA256 is rejected.
+    monkeypatch.setattr(browser, "OPENCLI_EXTENSION_HASHES", {"opencli-extension-v9.9.9.zip": "0" * 64})
+    with pytest.raises(ReachError, match="SHA256 mismatch"):
+        browser.refresh_extension()
+
+
+def test_unzip_rejects_symlinks_and_zip_slip(tmp_path):
+    sym_zip = tmp_path / "sym.zip"
+    with zipfile.ZipFile(sym_zip, "w") as zf:
+        info = zipfile.ZipInfo("evil_link")
+        info.external_attr = (0o120777) << 16
+        zf.writestr(info, "/etc/passwd")
+    with pytest.raises(ValueError, match="symlinks"):
+        browser._unzip(sym_zip, tmp_path / "out1")
+
+    slip_zip = tmp_path / "slip.zip"
+    with zipfile.ZipFile(slip_zip, "w") as zf:
+        zf.writestr("../escape.txt", "pwned")
+    with pytest.raises(ValueError, match="unsafe path"):
+        browser._unzip(slip_zip, tmp_path / "out2")
 
 
 def test_extension_refresh_offline_keeps_the_current_copy(home, monkeypatch):
