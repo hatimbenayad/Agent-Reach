@@ -316,7 +316,24 @@ def test_github_target_forms(target, expected):
     assert _parse_target(target) == expected
 
 
-@pytest.mark.parametrize("bad", ["not a target", "https://gitlab.com/a/b/c/d", "a/b/c"])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "not a target",
+        "https://gitlab.com/a/b/c/d",
+        "a/b/c",
+        "../users",
+        "owner/..",
+        "owner/.",
+        "./repo",
+        "-bad/repo",
+        "bad-/repo",
+        "bad..owner/repo",
+        "owner_name/repo",
+        "https://github.com/../orgs",
+        "https://github.com/owner/..",
+    ],
+)
 def test_github_rejects_other_targets(bad):
     with pytest.raises(ReachError) as info:
         _parse_target(bad)

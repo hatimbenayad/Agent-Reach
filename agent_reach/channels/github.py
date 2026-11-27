@@ -24,9 +24,11 @@ from .base import Action, Channel, Param
 
 _API = "https://api.github.com"
 _TARGET_RE = re.compile(
-    r"^(?:https?://(?:www\.)?github\.com/)?([\w.-]+)/([\w.-]+?)(?:\.git)?"
+    r"^(?:https?://(?:www\.)?github\.com/)?([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+?)(?:\.git)?"
     r"(?:/(?:issues|pull)/(\d+))?/?(?:[?#].*)?$"
 )
+_OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
+_REPO_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 _README_MAX_CHARS = 50_000
 
 _GH_READ_ONLY_ENV = {
@@ -45,13 +47,15 @@ def _parse_target(target: str):
     if not m:
         raise ReachError(BAD_INPUT, "target must be owner/repo or a github.com repo/issue/PR link")
     owner, repo, number = m.groups()
+    if not _OWNER_RE.fullmatch(owner) or not _REPO_RE.fullmatch(repo) or repo in {".", ".."}:
+        raise ReachError(BAD_INPUT, "target contains an invalid GitHub owner or repository name")
     return owner, repo, int(number) if number else None
 
 
 def _gh_get(path: str, timeout: float, accept: str = "application/vnd.github+json") -> bytes:
     try:
         out = run_cmd(
-            ["gh", "api", "-H", f"Accept: {accept}", path],
+            ["gh", "api", "-H", f"Accept: {accept}", "--", path],
             timeout=timeout,
             env=_GH_READ_ONLY_ENV,
         )
