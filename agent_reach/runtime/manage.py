@@ -1022,7 +1022,11 @@ def configure(key: str, value: str) -> dict:
     if key not in CONFIG_KEYS:
         raise ReachError(BAD_INPUT, f"unknown key: {key}; valid: {', '.join(CONFIG_KEYS)}")
     if not value:
-        raise ReachError(BAD_INPUT, "empty value")
+        raise ReachError(
+            BAD_INPUT,
+            "empty value",
+            hint="Provide the value via `--stdin` or run `agent-reach configure <key>` interactively.",
+        )
     if key == "browser-port":
         if not (value.isascii() and value.isdigit()) or not 1024 <= int(value) <= 65535:
             raise ReachError(BAD_INPUT, "browser-port must be a number from 1024 to 65535")

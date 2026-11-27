@@ -65,7 +65,7 @@ For the user:
   agent-reach doctor [--text]             status of every channel and installed tool versions (no network)
   agent-reach check [channel] [--text]    live-test channels; --search tests search/jobs only
   agent-reach update [--check]            upgrade Agent Reach, every added channel's tools and the skill
-  agent-reach configure <key> [value]     groq-key | openai-key | proxy | github-token | browser-port
+  agent-reach configure <key> [--stdin]   groq-key | openai-key | proxy | github-token | browser-port
   agent-reach uninstall [--dry-run]       remove everything Agent Reach installed
 """
 
@@ -349,9 +349,16 @@ def _cmd_management(head: str, args: Sequence[str]) -> int:
     if head == "uninstall":
         return _mgmt(head, manage.uninstall, dry_run=ns.dry_run)
     if head == "configure":
+        secret_keys = {"groq-key", "openai-key", "github-token", "proxy"}
         value = ns.value
+        if value is not None and ns.key in secret_keys:
+            sys.stderr.write(
+                f"Warning: passing '{ns.key}' as a CLI argument may expose it in shell history or "
+                "process listings; prefer `--stdin` or an interactive prompt.\n"
+            )
+            sys.stderr.flush()
         if ns.stdin:
-            if sys.stdin.isatty() and ns.key.endswith("-key"):
+            if sys.stdin.isatty() and ns.key in secret_keys:
                 import getpass
 
                 value = getpass.getpass(f"{ns.key}: ").strip()

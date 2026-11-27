@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """Configuration management for Agent Reach.
 
-Stores settings in ~/.agent-reach/config.yaml. Reads never create files or
-directories; the private directory is created only on the first write.
+Stores settings (including API keys, proxy credentials, and cookies) in
+plaintext YAML at ~/.agent-reach/config.yaml with owner-only permissions
+(0o600/0o700 on POSIX; user profile ACLs on Windows). Reads never create files
+or directories; the private directory is created only on the first write.
 """
 
 import os

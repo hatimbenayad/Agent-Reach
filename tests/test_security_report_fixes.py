@@ -169,3 +169,14 @@ def test_envelope_sanitizes_control_chars_and_marks_untrusted_content():
     )
     assert "\x07" not in err.message
     assert err.hint is None
+
+
+def test_configure_warns_when_secret_passed_as_cli_arg(capsys, monkeypatch):
+    from agent_reach.runtime import cli
+
+    monkeypatch.setattr("agent_reach.runtime.manage.configure", lambda k, v: {"key": k, "saved": True})
+    code = cli.main(["configure", "groq-key", "gsk_dummy"])
+    assert code == 0
+    captured = capsys.readouterr()
+    assert "Warning:" in captured.err
+    assert "--stdin" in captured.err
