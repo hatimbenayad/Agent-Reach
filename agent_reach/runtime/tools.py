@@ -52,6 +52,12 @@ class Tool:
     dep_caps: Tuple[Tuple[str, str], ...] = ()  # (dependency, first bad version) that `tested` cannot use
 
 
+_BOSS_ARCHIVE_URL = (
+    "https://github.com/can4hou6joeng4/boss-agent-cli/archive/"
+    "4c991b77086a203173bf08a4cb64a23af6514fe6.zip"
+)
+BOSS_ARCHIVE_SHA256 = "240dfa7d2b7b0093e43735f49ae6d47ee415b7e21fde230075b6d311072bd04f"
+
 TOOLS: Dict[str, Tool] = {
     t.name: t
     for t in (
@@ -61,7 +67,7 @@ TOOLS: Dict[str, Tool] = {
         Tool("bili-cli", "pip", "bilibili-cli", ("bili",), tested="0.6.2"),
         Tool(
             "boss-agent-cli", "pip",
-            "boss-agent-cli @ https://github.com/can4hou6joeng4/boss-agent-cli/archive/4c991b77086a203173bf08a4cb64a23af6514fe6.zip",
+            f"boss-agent-cli @ {_BOSS_ARCHIVE_URL}",
             ("boss",),
         ),
         Tool("opencli", "npm", "@jackwener/opencli", ("opencli",), singleton=True, floor="1.8.7", exclude=("1.8.8",), tested="2.0.3", needs=("node",)),
@@ -331,7 +337,10 @@ def _install_pip(tool: Tool) -> None:
     if not py.is_file():
         _run([sys.executable, "-m", "venv", str(venv)], stage=f"{tool.name}:venv")
     caps = [f"{dist}<{bad}" for dist, bad in tool.dep_caps]
-    _run([str(py), "-m", "pip", "install", "--quiet", "--disable-pip-version-check", install_spec(tool), *caps],
+    spec = install_spec(tool)
+    if tool.name == "boss-agent-cli" and "#" not in spec:
+        spec = f"{spec}#sha256={BOSS_ARCHIVE_SHA256}"
+    _run([str(py), "-m", "pip", "install", "--quiet", "--disable-pip-version-check", spec, *caps],
          stage=f"{tool.name}:pip_packages")
     if tool.kind == "ffmpeg":
         exe = _run([str(py), "-c", "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"]).strip()
@@ -355,9 +364,8 @@ def _npm_cmd() -> str:
 def _install_npm(tool: Tool, *, global_prefix: Optional[Path] = None, system_global: bool = False) -> None:
     npm = _npm_cmd()
     spec = install_spec(tool)
-    # OpenCLI ships its adapters; install hooks must not replace this verified
-    # release with mutable adapters or write unrelated agent configurations.
-    hooks = ["--ignore-scripts"] if tool.name == "opencli" else []
+    # Disable npm lifecycle scripts for all package installs to prevent install-time code execution.
+    hooks = ["--ignore-scripts"]
     if system_global:
         _run([npm, "install", "-g", *hooks, spec])
     elif global_prefix is not None:
@@ -381,10 +389,60 @@ def _node_platform() -> Tuple[str, str, str]:
     return os_name, arch, "zip" if os_name == "win" else "tar.gz"
 
 
+def _safe_extract_zip(archive: Path, out: Path) -> None:
+    import zipfile
+
+    root = out.resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive) as zf:
+        for info in zf.infolist():
+            mode = info.external_attr >> 16
+            if (mode & 0o170000) == 0o120000:
+                raise ReachError(UPSTREAM_BROKEN, f"symlinks not allowed in archive: {info.filename}")
+            member = Path(info.filename)
+            if member.is_absolute() or ".." in member.parts:
+                raise ReachError(UPSTREAM_BROKEN, f"unsafe path in archive: {info.filename}")
+            target = (out / member).resolve()
+            if target != root and root not in target.parents:
+                raise ReachError(UPSTREAM_BROKEN, f"unsafe path in archive: {info.filename}")
+            if info.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(info) as src, open(target, "wb") as dst:
+                    shutil.copyfileobj(src, dst, 1 << 16)
+
+
+def _safe_extract_tar(archive: Path, out: Path) -> None:
+    import tarfile
+
+    root = out.resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive) as tf:
+        if hasattr(tarfile, "data_filter"):
+            tf.extractall(out, filter="data")
+            return
+        for member in tf.getmembers():
+            member_path = Path(member.name)
+            if member_path.is_absolute() or ".." in member_path.parts:
+                raise ReachError(UPSTREAM_BROKEN, f"unsafe path in archive: {member.name}")
+            target = (out / member_path).resolve()
+            if target != root and root not in target.parents:
+                raise ReachError(UPSTREAM_BROKEN, f"unsafe path in archive: {member.name}")
+            if member.issym() or member.islnk():
+                link_target = Path(member.linkname)
+                if link_target.is_absolute():
+                    raise ReachError(UPSTREAM_BROKEN, f"unsafe link in archive: {member.name}")
+                resolved_link = (target.parent / link_target).resolve()
+                if resolved_link != root and root not in resolved_link.parents:
+                    raise ReachError(UPSTREAM_BROKEN, f"unsafe link in archive: {member.name}")
+            elif not (member.isdir() or member.isreg()):
+                raise ReachError(UPSTREAM_BROKEN, f"unsupported tar member type: {member.name}")
+            tf.extract(member, out)
+
+
 def _install_node(tool: Tool) -> None:
     import hashlib
-    import tarfile
-    import zipfile
 
     os_name, arch, ext = _node_platform()
     from agent_reach.utils.paths import private_temporary_directory
@@ -407,18 +465,14 @@ def _install_node(tool: Tool) -> None:
         sums = Path(tmp) / "SHASUMS256.txt"
         _download(f"{base}/SHASUMS256.txt", sums)
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-        if f"{digest}  {archive.name}" not in sums.read_text("utf-8"):
+        expected_line = f"{digest}  {archive.name}"
+        if expected_line not in sums.read_text("utf-8").splitlines():
             raise ReachError(UPSTREAM_BROKEN, f"checksum mismatch for {archive.name}")
         out = Path(tmp) / "x"
         if ext == "zip":
-            with zipfile.ZipFile(archive) as zf:
-                zf.extractall(out)
+            _safe_extract_zip(archive, out)
         else:
-            with tarfile.open(archive) as tf:
-                if hasattr(tarfile, "data_filter"):
-                    tf.extractall(out, filter="data")
-                else:  # pragma: no cover - Python < 3.12 without the filter backport
-                    tf.extractall(out)
+            _safe_extract_tar(archive, out)
         dest = tool_dir("node")
         shutil.rmtree(dest, ignore_errors=True)
         dest.mkdir(parents=True)

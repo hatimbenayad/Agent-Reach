@@ -130,3 +130,45 @@ def test_install_uv_uses_hash_verified_wheel_without_remote_scripts(monkeypatch,
     assert "--only-binary" in argv and "--require-hashes" in argv
     assert tools._private_bin(tools.TOOLS["uv"], "uv").is_file()
     assert tools._private_bin(tools.TOOLS["uv"], "uvx").is_file()
+
+
+def test_npm_ignore_scripts_applies_to_all_packages(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(tools, "_npm_cmd", lambda: "npm")
+    monkeypatch.setattr(tools, "_run", lambda argv, **kwargs: calls.append(argv) or "")
+    other_npm = tools.Tool("mcporter", "npm", "mcporter", ("mcporter",))
+    tools._install_npm(other_npm, global_prefix=tmp_path / "npm")
+    assert "--ignore-scripts" in calls[0]
+
+
+def test_boss_agent_cli_pip_install_pins_sha256(monkeypatch, tmp_path):
+    tool = tools.TOOLS["boss-agent-cli"]
+    monkeypatch.setattr(tools, "tool_dir", lambda name: tmp_path / name)
+    py = tmp_path / tool.name / "venv" / ("Scripts/python.exe" if tools._WIN else "bin/python")
+    py.parent.mkdir(parents=True)
+    py.write_text("py", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(tools, "_run", lambda argv, **kwargs: calls.append(argv) or "")
+    tools._install_pip(tool)
+    assert any(f"#sha256={tools.BOSS_ARCHIVE_SHA256}" in arg for arg in calls[0])
+
+
+def test_safe_extract_rejects_zip_slip_and_tar_slip(tmp_path):
+    import io
+    import tarfile
+    import zipfile
+
+    bad_zip = tmp_path / "bad.zip"
+    with zipfile.ZipFile(bad_zip, "w") as zf:
+        zf.writestr("../escape.txt", "x")
+    with pytest.raises(ReachError, match="unsafe path"):
+        tools._safe_extract_zip(bad_zip, tmp_path / "zout")
+
+    bad_tar = tmp_path / "bad.tar.gz"
+    with tarfile.open(bad_tar, "w:gz") as tf:
+        info = tarfile.TarInfo("../escape.txt")
+        data = b"x"
+        info.size = len(data)
+        tf.addfile(info, io.BytesIO(data))
+    with pytest.raises(Exception):
+        tools._safe_extract_tar(bad_tar, tmp_path / "tout")
