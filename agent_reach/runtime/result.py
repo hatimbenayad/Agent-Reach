@@ -16,7 +16,11 @@ import subprocess
 import urllib.error
 from typing import Any, Optional
 
-from agent_reach.utils.text import scrub_url_credentials
+from agent_reach.utils.text import (
+    sanitize_untrusted_value,
+    scrub_url_credentials,
+    strip_control_chars,
+)
 
 SCHEMA_VERSION = 1
 
@@ -58,7 +62,7 @@ class ReachError(Exception):
 
 
 def _clean(text: object) -> str:
-    return scrub_url_credentials(str(text)).strip()[:_MAX_MESSAGE_CHARS]
+    return strip_control_chars(scrub_url_credentials(str(text))).strip()[:_MAX_MESSAGE_CHARS]
 
 
 def classify(exc: BaseException) -> ReachError:
@@ -92,13 +96,19 @@ def make_item(
     raw: Any = None,
 ) -> dict:
     """One normalized item. Missing fields are null; `raw` keeps upstream data."""
+    def _clean_opt(val: Optional[str]) -> Optional[str]:
+        if not val:
+            return None
+        cleaned = strip_control_chars(val)
+        return cleaned or None
+
     return {
-        "title": title or None,
-        "url": url or None,
-        "author": author or None,
-        "published_at": published_at or None,
-        "text": text or None,
-        "raw": raw,
+        "title": _clean_opt(title),
+        "url": _clean_opt(url),
+        "author": _clean_opt(author),
+        "published_at": _clean_opt(published_at),
+        "text": _clean_opt(text),
+        "raw": sanitize_untrusted_value(raw),
     }
 
 
@@ -124,19 +134,24 @@ def envelope(
     error: Optional[ReachError] = None,
 ) -> dict:
     """Build the unified output object."""
+    sanitized_items = sanitize_untrusted_value(list(items or [])) if error is None else []
     return {
         "schema_version": SCHEMA_VERSION,
         "ok": error is None,
         "channel": channel,
         "action": action,
         "backend": backend if error is None else None,
-        "items": list(items or []) if error is None else [],
-        "meta": {"elapsed_ms": elapsed_ms, "attempts": list(attempts or [])},
+        "items": sanitized_items,
+        "meta": {
+            "elapsed_ms": elapsed_ms,
+            "attempts": list(attempts or []),
+            "untrusted_content": True,
+        },
         "error": None
         if error is None
         else {
             "code": error.code,
-            "message": error.message,
+            "message": _clean(error.message),
             "hint": error.hint or DEFAULT_HINTS.get(error.code, ""),
         },
     }

@@ -681,16 +681,19 @@ def test_opencli_errors_map_to_unified_codes(yaml_text, code):
     assert _opencli_error(yaml_text, "").code == code
 
 
-def test_opencli_message_and_help_reach_the_agent_unchanged():
+def test_opencli_message_reaches_agent_without_forwarding_upstream_help():
     from agent_reach.backends.opencli import _opencli_error
-    from agent_reach.runtime.result import envelope
+    from agent_reach.runtime.result import DEFAULT_HINTS, envelope
 
     text = ("node warning\nok: false\nerror:\n  code: BROWSER_CONNECT\n"
             "  message: Browser profile \"x\" is not connected\n  help: Open the matching Chrome profile.\n")
     err = _opencli_error(text, "reach login steps")
     out = envelope(channel="reddit", action="search", error=err)["error"]
-    assert out == {"code": "UPSTREAM_BROKEN", "message": 'Browser profile "x" is not connected',
-                   "hint": "Open the matching Chrome profile."}
+    assert out == {
+        "code": "UPSTREAM_BROKEN",
+        "message": 'Browser profile "x" is not connected',
+        "hint": DEFAULT_HINTS["UPSTREAM_BROKEN"],
+    }
     login = _opencli_error("ok: false\nerror:\n  code: AUTH_REQUIRED\n  message: Not logged into x.com\n"
                            "  help: Log in in your Chrome.\n", "reach login steps")
     assert login.message == "Not logged into x.com" and login.hint == "reach login steps"  # Reach's own browser

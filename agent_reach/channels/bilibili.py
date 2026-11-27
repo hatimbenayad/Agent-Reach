@@ -73,19 +73,20 @@ def _bili_json(args: list, timeout: float) -> Any:
     except ValueError:
         raise ReachError(UPSTREAM_BROKEN, "bili-cli returned unreadable output") from None
     if not payload.get("ok"):
+        from agent_reach.utils.text import strip_control_chars
+
         err = payload.get("error") or {}
         code = str(err.get("code", ""))
-        message = str(err.get("message", "bili-cli failed"))[:500]
-        upstream_hint = str(err.get("hint") or "").strip() or None
+        message = strip_control_chars(err.get("message", "bili-cli failed"))[:500]
         if any(word in code.lower() for word in ("risk", "captcha", "verification")):
-            raise ReachError(PLATFORM_BLOCKED, message, hint=upstream_hint)
+            raise ReachError(PLATFORM_BLOCKED, message)
         if "rate" in code.lower() or "频繁" in message:
             raise ReachError(RATE_LIMITED, message)
         if code == "not_found":
             raise ReachError(NOT_FOUND, message)
         if "login" in code or "auth" in code or "credential" in code:
             raise ReachError(NEED_LOGIN, message, hint=_BILI_LOGIN_HINT)
-        raise ReachError(UPSTREAM_BROKEN, message, hint=upstream_hint)
+        raise ReachError(UPSTREAM_BROKEN, message)
     return payload.get("data") or {}
 
 
