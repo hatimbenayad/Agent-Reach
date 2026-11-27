@@ -899,6 +899,14 @@ def _finish_update(command: List[str]) -> dict:
     return report["result"]
 
 
+def _uv_installed_exe(uv: str) -> Path:
+    """Resolve the installed `agent-reach` binary inside uv's bin dir (never CWD PATH)."""
+    bin_dir = subprocess.run([uv, "tool", "dir", "--bin"], capture_output=True, text=True, timeout=60).stdout.strip()
+    if not bin_dir:
+        return Path(sys.executable)
+    return Path(bin_dir) / ("agent-reach.exe" if os.name == "nt" else "agent-reach")
+
+
 def _move_to_uv(info: dict) -> dict:
     """This copy was installed with pip/pipx (1.5 style). Install the release with uv, let the
     new copy set itself up (it removes known old copies), then remove this copy too."""
@@ -918,8 +926,7 @@ def _move_to_uv(info: dict) -> dict:
     if proc.returncode != 0:
         raise ReachError(UPSTREAM_BROKEN, f"upgrade failed: {proc.stderr.strip()[-300:]}",
                          hint=f"Run manually: {' '.join(cmd)}")
-    bin_dir = subprocess.run([uv, "tool", "dir", "--bin"], capture_output=True, text=True, timeout=60).stdout.strip()
-    exe = Path(bin_dir) / ("agent-reach.exe" if os.name == "nt" else "agent-reach")
+    exe = _uv_installed_exe(uv)
     child = [str(exe), "setup"] if fresh else [str(exe), "update", "--sync-only"]
     result = _finish_update(child)
     actions = list(result.get("user_actions") or [])
@@ -947,7 +954,8 @@ def update(check_only: bool = False) -> dict:
         return _move_to_uv(info)
     if info["update_available"] and method != "editable":
         cmd = upgrade_command(info["latest"])
-        run = [tools.resolve("uv") or cmd[0], *cmd[1:]]
+        uv = tools.resolve("uv") or cmd[0]
+        run = [uv, *cmd[1:]]
         try:
             proc = subprocess.run(run, capture_output=True, text=True, timeout=900)
         except FileNotFoundError:
@@ -956,8 +964,8 @@ def update(check_only: bool = False) -> dict:
         if proc.returncode != 0:
             raise ReachError(UPSTREAM_BROKEN, f"upgrade failed: {proc.stderr.strip()[-300:]}",
                              hint=f"Run manually: {' '.join(cmd)}")
-        exe = shutil.which("agent-reach") or sys.argv[0]
-        synced = _finish_update([exe, "update", "--sync-only"])
+        exe = _uv_installed_exe(uv)
+        synced = _finish_update([str(exe), "update", "--sync-only"])
         return {**info, "upgraded": True, "method": method, "sync": synced,
                 "user_actions": synced.get("user_actions", [])}
     synced = sync()

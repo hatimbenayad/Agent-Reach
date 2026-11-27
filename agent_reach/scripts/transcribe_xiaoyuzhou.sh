@@ -80,7 +80,7 @@ if [ -z "$GROQ_API_KEY" ]; then
             CONFIG_FOR_PYTHON=$(cygpath -w "$CONFIG_FILE")
         fi
         GROQ_API_KEY=$(AGENT_REACH_CONFIG_FILE="$CONFIG_FOR_PYTHON" \
-            "${PYTHON_CMD[@]}" -c 'import os, yaml; print((yaml.safe_load(open(os.environ["AGENT_REACH_CONFIG_FILE"])) or {}).get("groq_api_key", ""))' \
+            "${PYTHON_CMD[@]}" -c 'import os, yaml; print((yaml.safe_load(open(os.environ["AGENT_REACH_CONFIG_FILE"], encoding="utf-8")) or {}).get("groq_api_key", ""))' \
             2>/dev/null || true)
     fi
 fi
@@ -125,12 +125,13 @@ echo "===================="
 # Step 1: 提取音频 URL 和标题
 echo "🔍 正在解析页面..."
 PAGE=$(curl --fail --show-error --location --silent \
+    --proto =https,http --proto-redir =https \
     --connect-timeout "$CURL_CONNECT_TIMEOUT" \
     --max-time "$PAGE_TIMEOUT" \
     --max-filesize "$MAX_PAGE_BYTES" \
     "$URL")
 AUDIO_URL=$(echo "$PAGE" | perl -ne 'while (/(https:\/\/media\.xyzcdn\.net\/[^"]*\.(?:m4a|mp3))/gi) { print "$1\n" }' | head -1)
-TITLE=$(echo "$PAGE" | perl -ne 'if (/"title":"([^"]*)"/) { print "$1\n"; last }' | head -1)
+TITLE=$(echo "$PAGE" | perl -ne 'if (/"title":"([^"]*)"/) { print "$1\n"; last }' | head -1 | tr -d '\r\n')
 
 if [ -z "$AUDIO_URL" ]; then
     echo "❌ 无法从页面提取音频链接"
@@ -144,6 +145,7 @@ echo "🔗 音频: $AUDIO_URL"
 echo "⬇️  正在下载音频..."
 EXT="${AUDIO_URL##*.}"
 curl --fail --show-error --location --silent \
+    --proto =https,http --proto-redir =https \
     --connect-timeout "$CURL_CONNECT_TIMEOUT" \
     --max-time "$AUDIO_TIMEOUT" \
     --max-filesize "$MAX_AUDIO_BYTES" \
