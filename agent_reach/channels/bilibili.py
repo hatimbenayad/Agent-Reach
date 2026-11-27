@@ -27,7 +27,7 @@ from agent_reach.runtime.result import (
 )
 from agent_reach.runtime.run import CommandFailed, http_request, run_cmd
 from agent_reach.runtime.sessions import has_login_state, session_env
-from agent_reach.utils.url import host_matches
+from agent_reach.utils.url import assert_public_http_url, host_matches, safe_urlopen
 
 from .base import Action, Channel, Param
 
@@ -48,9 +48,13 @@ def _bvid(target: str, timeout: float) -> str:
     # Only http(s) links on the b23.tv host: a substring test would let any URL
     # containing "b23.tv/" (file://, localhost, intranet) be fetched.
     if host_matches(url, "b23.tv"):
-        req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": _UA})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            m = _BV_RE.search(resp.geturl())
+        try:
+            safe_url = assert_public_http_url(url)
+            req = urllib.request.Request(safe_url, method="HEAD", headers={"User-Agent": _UA})
+            with safe_urlopen(req, timeout=timeout) as resp:
+                m = _BV_RE.search(resp.geturl())
+        except ValueError as exc:
+            raise ReachError(BAD_INPUT, f"SSRF blocked: {exc}") from None
         if m:
             return m.group(0)
     raise ReachError(BAD_INPUT, "target must be a BV id or a bilibili.com / b23.tv video link")

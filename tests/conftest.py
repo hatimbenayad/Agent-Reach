@@ -3,6 +3,7 @@
 
 import os
 import shutil
+import socket
 import subprocess
 import urllib.request
 from pathlib import Path
@@ -90,6 +91,14 @@ def isolated_home(tmp_path, monkeypatch):
     def no_network(*args, **kwargs):
         raise OSError("Unit tests require an explicit mocked HTTP response")
     monkeypatch.setattr(urllib.request, "urlopen", no_network)
+    # Deterministic offline DNS for unit tests; SSRF tests monkeypatch getaddrinfo explicitly.
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda host, port, *a, **k: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", int(port or 443)))
+        ],
+    )
 
     from agent_reach.runtime import bridge, cdp
     monkeypatch.setattr(bridge, "status", lambda: {"ok": True, "daemonVersion": "1.8.7", "profiles": []})

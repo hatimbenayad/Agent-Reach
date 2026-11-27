@@ -656,28 +656,27 @@ class TestDownloadAudioSafety:
 
         assert captured["cmd"][-1] == "youtu.be/abc123"
 
-    def test_does_not_dns_resolve_public_hostnames(self, monkeypatch, tmp_path):
+    def test_blocks_hostnames_resolving_to_non_public_ips(self, monkeypatch, tmp_path):
         import socket
 
         monkeypatch.setattr(tr, "_require", lambda binary: None)
         monkeypatch.setattr(
             socket,
             "getaddrinfo",
+            lambda host, port, *a, **k: [
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", int(port or 443)))
+            ],
+        )
+        monkeypatch.setattr(
+            tr,
+            "_run",
             lambda *args, **kwargs: (_ for _ in ()).throw(
-                AssertionError("public hostnames should not be DNS-resolved here")
+                AssertionError("yt-dlp must not run when DNS resolves to loopback")
             ),
         )
-        captured = {}
 
-        def fake_run(cmd, timeout=600):
-            captured["cmd"] = cmd
-            (tmp_path / "source.m4a").write_bytes(b"audio")
-
-        monkeypatch.setattr(tr, "_run", fake_run)
-
-        tr.download_audio("https://youtu.be/abc123", tmp_path)
-
-        assert captured["cmd"][-1] == "https://youtu.be/abc123"
+        with pytest.raises(tr.TranscribeError, match="SSRF blocked"):
+            tr.download_audio("https://evil-rebind.example/audio.mp3", tmp_path)
 
     # The C resolver behind yt-dlp accepts the full inet_aton grammar, so a
     # canonical dotted-quad check alone lets loopback and the cloud metadata

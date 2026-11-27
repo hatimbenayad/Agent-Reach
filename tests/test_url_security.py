@@ -137,3 +137,62 @@ def test_fixed_domain_channels_reject_suffix_lookalikes_and_userinfo(
 )
 def test_host_matches_rejects_invalid_ports(malicious_url):
     assert not host_matches(malicious_url, "x.com")
+
+
+@pytest.mark.parametrize(
+    "resolved_ip",
+    ["127.0.0.1", "10.0.0.5", "169.254.169.254", "::1", "::ffff:127.0.0.1"],
+)
+def test_assert_public_http_url_blocks_private_dns_resolutions(monkeypatch, resolved_ip):
+    import socket
+
+    from agent_reach.utils.url import assert_public_http_url
+
+    family = socket.AF_INET6 if ":" in resolved_ip else socket.AF_INET
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda host, port, *a, **k: [(family, socket.SOCK_STREAM, 6, "", (resolved_ip, 443))],
+    )
+    with pytest.raises(ValueError, match="non-public IP"):
+        assert_public_http_url("https://rebind.example/audio.mp3")
+
+
+def test_assert_public_http_url_fails_closed_on_dns_error(monkeypatch):
+    import socket
+
+    from agent_reach.utils.url import assert_public_http_url
+
+    def fail_dns(*_a, **_k):
+        raise socket.gaierror("name resolution failed")
+
+    monkeypatch.setattr(socket, "getaddrinfo", fail_dns)
+    with pytest.raises(ValueError, match="DNS resolution failed"):
+        assert_public_http_url("https://missing.example/audio.mp3")
+
+
+def test_safe_urlopen_blocks_redirect_to_private_host(monkeypatch):
+    import urllib.request
+
+    from agent_reach.utils.url import _SafeRedirectHandler, safe_urlopen
+
+    handler = _SafeRedirectHandler()
+    req = urllib.request.Request("https://b23.tv/abc", method="HEAD")
+    with pytest.raises(ValueError, match="HTTP\\(S\\)"):
+        handler.redirect_request(req, None, 302, "Found", {}, "http://127.0.0.1:9222/json")
+    with pytest.raises(ValueError, match="HTTP\\(S\\)"):
+        handler.redirect_request(req, None, 302, "Found", {}, "file:///etc/passwd")
+
+    class BadRedirectResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def geturl(self):
+            return "http://169.254.169.254/latest/meta-data"
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: BadRedirectResp())
+    with pytest.raises(ValueError, match="only public HTTP"):
+        safe_urlopen(req, timeout=1)
